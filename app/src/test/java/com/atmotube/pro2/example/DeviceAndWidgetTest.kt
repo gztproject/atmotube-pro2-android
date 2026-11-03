@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.util.Locale
 import java.util.TimeZone
 
@@ -111,6 +112,28 @@ class DeviceAndWidgetTest {
         val restored = PmTracker.decode(held.encode())
         assertEquals(15.0, restored.display(off).reading!!.pm25, 0.001)
     }
+
+    @Test
+    fun rotationKeepsTheActivityAndTheLink() {
+        val manifest = sourceFile("src/main/AndroidManifest.xml").readText()
+        val activity = manifest.substringAfter("<activity").substringBefore("</activity>")
+        assertTrue(activity.contains("android:name=\".MainActivity\""))
+        val changes = activity.substringAfter("android:configChanges=\"").substringBefore("\"")
+        listOf("orientation", "screenSize", "screenLayout", "smallestScreenSize").forEach { flag ->
+            assertTrue("$flag is required so rotation does not recreate the activity", changes.split("|").contains(flag))
+        }
+        val onDestroy = sourceFile("src/main/java/com/atmotube/pro2/example/MainActivity.kt")
+            .readText()
+            .substringAfter("override fun onDestroy()")
+            .substringBefore("@Composable")
+        assertTrue(!onDestroy.contains("disconnect"))
+        val session = sourceFile("src/main/java/com/atmotube/pro2/example/AirSession.kt").readText()
+        assertTrue(session.contains("override fun onCleared()"))
+        assertTrue(session.contains("disconnect()"))
+    }
+
+    private fun sourceFile(relative: String): File =
+        listOf(File(relative), File("app/$relative")).first { it.exists() }
 
     private fun pm(pm1: Double, pm25: Double, pm10: Double, particles: Int) = AtmotubePmReading(
         pm1 = pm1,

@@ -23,6 +23,7 @@
         android:theme="@style/Theme.AtmotubePRO2Example" >
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.AtmotubePRO2Example">

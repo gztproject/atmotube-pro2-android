@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import java.io.File
 
 class MainActivity : ComponentActivity() {
 
+    private val session: AirSession by viewModels()
     private lateinit var bleManager: AtmotubeBleManager
     private lateinit var historyManager: HistoryManager
     private lateinit var prefs: SharedPreferences
@@ -132,8 +134,12 @@ class MainActivity : ComponentActivity() {
         pmTracker = PmTracker.decode(prefs.getString(AirStore.KEY_PM_HOLD, null))
         widgetPollutants = decodeWidgetSelection(prefs.getString(AirStore.KEY_WIDGET_POLLUTANTS, null))
         alerts = AirAlerts(this)
-        bleManager = AtmotubeBleManager(this, lifecycleScope)
-        historyManager = HistoryManager(this, bleManager)
+        bleManager = session.bleManager
+        historyManager = session.historyManager
+        activeDevice = session.device
+        if (bleManager.connectionState.value !is ConnectionState.Disconnected) {
+            currentScreen = Screen.DASHBOARD
+        }
 
         setContent {
             val darkTheme = isSystemInDarkTheme()
@@ -154,7 +160,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (currentScreen == Screen.SCAN) ensureScan(fromUser = false)
+        val connected = ::bleManager.isInitialized && bleManager.connectionState.value !is ConnectionState.Disconnected
+        if (currentScreen == Screen.SCAN && !connected) ensureScan(fromUser = false)
     }
 
     override fun onStop() {
@@ -164,9 +171,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         stopScan()
-        if (::bleManager.isInitialized) {
-            bleManager.disconnect().enqueue()
-        }
+        // The BLE link lives in [AirSession] and is closed from onCleared when this activity is
+        // finishing. Disconnecting here would drop it on every configuration change.
         super.onDestroy()
     }
 
@@ -461,6 +467,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connect(device: BluetoothDevice) {
         activeDevice = device
+        session.device = device
         stopScan()
         bleManager.connectToDevice(device)
     }
