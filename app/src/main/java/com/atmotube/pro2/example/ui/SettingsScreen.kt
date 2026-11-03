@@ -44,6 +44,8 @@ import com.atmotube.pro2.example.parseCut
 @Composable
 fun SettingsScreen(
     profile: BandProfile,
+    widgetPollutants: Set<Pollutant>,
+    onWidgetPollutants: (Set<Pollutant>) -> Unit,
     onBack: () -> Unit,
     onSave: (BandProfile) -> Unit,
 ) {
@@ -61,7 +63,7 @@ fun SettingsScreen(
         TextButton(onClick = onBack) { Text("Back") }
         Text("Bands and alerts", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Each number is the top of that band. A reading at or above the last number is Extremely poor. Alerts are sent while the phone stays connected to the device.",
+            "Each number is the top of that band. A reading at or above the last number is Extremely poor. Alerts are sent while the phone stays connected. Home screen puts that pollutant on the widget, using the current reading.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -70,8 +72,13 @@ fun SettingsScreen(
             PollutantCard(
                 pollutant = pollutant,
                 draft = draft,
+                onWidget = pollutant in widgetPollutants,
                 onDraft = { drafts = drafts + (pollutant to it) },
                 onPickLevel = { levelDialog = pollutant },
+                onWidgetChange = { checked ->
+                    val next = if (checked) widgetPollutants + pollutant else widgetPollutants - pollutant
+                    onWidgetPollutants(next)
+                },
             )
         }
         Button(
@@ -124,8 +131,10 @@ fun SettingsScreen(
 private fun PollutantCard(
     pollutant: Pollutant,
     draft: BandDraft,
+    onWidget: Boolean,
     onDraft: (BandDraft) -> Unit,
     onPickLevel: () -> Unit,
+    onWidgetChange: (Boolean) -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -167,6 +176,14 @@ private fun PollutantCard(
                     checked = draft.enabled,
                     onCheckedChange = { onDraft(draft.copy(enabled = it)) },
                 )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Home screen", style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = onWidget, onCheckedChange = onWidgetChange)
             }
         }
     }

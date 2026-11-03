@@ -264,6 +264,19 @@ fun formatCo2(ppm: Int?, locale: Locale = Locale.getDefault()): String {
     }
 }
 
+/** A real PM mass reading. Off, heating, and non-finite sentinels are skipped. */
+fun usablePm(value: Double): Double? {
+    if (!value.isFinite()) return null
+    if (value in AtmotubeReading.offValues || value in AtmotubeReading.heatingValues) return null
+    return value
+}
+
+/** Current PM stays on the card. The hour is a footnote once it has been collected. */
+fun pmCardFootnote(current: Double, hourlyAverage: Double?, locale: Locale = Locale.getDefault()): String? {
+    if (usablePm(current) == null) return null
+    return if (hourlyAverage != null) "This hour ${formatPm(hourlyAverage, locale)}" else "Live"
+}
+
 fun formatPm(micrograms: Double?, locale: Locale = Locale.getDefault()): String {
     if (micrograms == null) return "—"
     val reading = interpretPollutant(Pollutant.PM25, micrograms, defaultCuts(Pollutant.PM25))

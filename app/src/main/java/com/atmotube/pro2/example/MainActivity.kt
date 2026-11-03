@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.atmotube.pro2.example.ui.AtmotubeAirTheme
+import com.atmotube.pro2.example.ui.DeviceSettingsScreen
 import com.atmotube.pro2.example.ui.DashboardScreen
 import com.atmotube.pro2.example.ui.FoundDevice
 import com.atmotube.pro2.example.ui.HistoryScreen
@@ -61,9 +62,16 @@ class MainActivity : ComponentActivity() {
     private var history by mutableStateOf<List<HistoryMeasurement>>(emptyList())
     private var historyFile by mutableStateOf<File?>(null)
     private var profile by mutableStateOf(defaultProfile())
+    private var pmHour by mutableStateOf(PmHourLog())
+    private var widgetPollutants by mutableStateOf(defaultWidgetPollutants())
+    private var pmStatus by mutableStateOf<PmStatus?>(null)
+    private var gnssStatus by mutableStateOf<GnssStatus?>(null)
+    private var deviceBusy by mutableStateOf(false)
+    private var deviceMessage by mutableStateOf<String?>(null)
     private var previousLevels by mutableStateOf<Map<Pollutant, AirLevel>>(emptyMap())
     private var previousAlertEnabled by mutableStateOf<Map<Pollutant, Boolean>>(emptyMap())
     private var pendingProfile: BandProfile? = null
+    private var lastWidgetEncoded: String? = null
     private var permissionRequestInFlight = false
     private var autoPrompted = false
 
@@ -113,9 +121,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        lastAddress = prefs.getString(KEY_ADDRESS, null)
-        profile = decodeProfile(prefs.getString(KEY_BANDS, null))
+        prefs = getSharedPreferences(AirStore.PREFS, MODE_PRIVATE)
+        lastAddress = prefs.getString(AirStore.KEY_ADDRESS, null)
+        profile = decodeProfile(prefs.getString(AirStore.KEY_BANDS, null))
+        pmHour = PmHourLog.decode(prefs.getString(AirStore.KEY_PM_HOUR, null))
+        widgetPollutants = decodeWidgetSelection(prefs.getString(AirStore.KEY_WIDGET_POLLUTANTS, null))
         alerts = AirAlerts(this)
         bleManager = AtmotubeBleManager(this, lifecycleScope)
         historyManager = HistoryManager(this, bleManager)
@@ -171,10 +181,20 @@ class MainActivity : ComponentActivity() {
                 activeDevice?.let { device ->
                     lastAddress = device.address
                     prefs.edit()
-                        .putString(KEY_ADDRESS, device.address)
-                        .putString(KEY_NAME, deviceName(device))
+                        .putString(AirStore.KEY_ADDRESS, device.address)
+                        .putString(AirStore.KEY_NAME, deviceName(device))
                         .apply()
                 }
+            }
+            if (connectionState is ConnectionState.Disconnected) {
+                pmStatus = null
+                gnssStatus = null
+            }
+        }
+
+        LaunchedEffect(currentScreen, connectionState) {
+            if (currentScreen == Screen.DEVICE && connectionState is ConnectionState.Ready) {
+                refreshDeviceSettings()
             }
         }
 
@@ -188,7 +208,25 @@ class MainActivity : ComponentActivity() {
             bleManager.historyReady.collect { historyPending = true }
         }
 
-        LaunchedEffect(reading, pmReading, profile) {
+        LaunchedEffect(pmReading) {
+            val sample = pmReading ?: return@LaunchedEffect
+            val next = pmHour.add(System.currentTimeMillis(), sample.pm1, sample.pm25, sample.pm10)
+            if (next != pmHour) {
+                pmHour = next
+                prefs.edit().putString(AirStore.KEY_PM_HOUR, next.encode()).apply()
+            }
+        }
+
+        LaunchedEffect(reading, pmReading, profile, widgetPollutants) {
+            if (reading != null || pmReading != null) {
+                val hourly = pmHour.hourly(System.currentTimeMillis())
+                val lines = widgetLines(widgetPollutants, reading, pmReading, profile.cuts, hourly)
+                val encoded = encodeWidgetLines(lines)
+                if (encoded != lastWidgetEncoded) {
+                    lastWidgetEncoded = encoded
+                    AirWidgetProvider.publish(this@MainActivity, lines, System.currentTimeMillis())
+                }
+            }
             val snapshots = pollutantSnapshots(reading, pmReading, profile.cuts)
             val current = snapshots.mapValues { it.value.level }
             val previousForAlerts = Pollutant.entries.associateWith { pollutant ->
@@ -205,7 +243,7 @@ class MainActivity : ComponentActivity() {
             previousAlertEnabled = profile.alerts.mapValues { it.value.enabled }
         }
 
-        BackHandler(enabled = currentScreen == Screen.HISTORY || currentScreen == Screen.TOOLS || currentScreen == Screen.SETTINGS) {
+        BackHandler(enabled = currentScreen == Screen.HISTORY || currentScreen == Screen.TOOLS || currentScreen == Screen.SETTINGS || currentScreen == Screen.DEVICE) {
             currentScreen = Screen.DASHBOARD
         }
 
@@ -220,12 +258,13 @@ class MainActivity : ComponentActivity() {
                 onDeviceClick = { device -> connect(device) },
             )
             Screen.DASHBOARD -> DashboardScreen(
-                deviceName = activeDevice?.let { deviceName(it) } ?: prefs.getString(KEY_NAME, null) ?: "Atmotube",
+                deviceName = activeDevice?.let { deviceName(it) } ?: prefs.getString(AirStore.KEY_NAME, null) ?: "Atmotube",
                 connectionState = connectionState,
                 firmwareVersion = firmware,
                 reading = reading,
                 pmReading = pmReading,
                 gpsReading = gpsReading,
+                hourlyPm = pmHour.hourly(System.currentTimeMillis()),
                 historyPending = historyPending,
                 hasHistory = history.isNotEmpty(),
                 isDownloadingHistory = isDownloadingHistory,
@@ -238,6 +277,7 @@ class MainActivity : ComponentActivity() {
                 onSyncHistory = { downloadHistory(openWhenDone = true) },
                 onOpenHistory = { currentScreen = Screen.HISTORY },
                 onOpenSettings = { currentScreen = Screen.SETTINGS },
+                onOpenDeviceSettings = { currentScreen = Screen.DEVICE },
                 onOpenTools = { currentScreen = Screen.TOOLS },
             )
             Screen.HISTORY -> HistoryScreen(
@@ -250,8 +290,23 @@ class MainActivity : ComponentActivity() {
             )
             Screen.SETTINGS -> SettingsScreen(
                 profile = profile,
+                widgetPollutants = widgetPollutants,
+                onWidgetPollutants = { updateWidgetPollutants(it) },
                 onBack = { currentScreen = Screen.DASHBOARD },
                 onSave = { saveProfile(it) },
+            )
+            Screen.DEVICE -> DeviceSettingsScreen(
+                connected = connectionState is ConnectionState.Ready,
+                busy = deviceBusy,
+                pm = pmStatus,
+                gps = gnssStatus,
+                message = deviceMessage,
+                onBack = { currentScreen = Screen.DASHBOARD },
+                onRefresh = { refreshDeviceSettings() },
+                onPmMode = { mode -> applyPm(mode, pmStatus?.charging == true) },
+                onPmCharging = { charging -> pmStatus?.let { applyPm(it.mode, charging) } },
+                onGpsMode = { mode -> applyGpsMode(mode) },
+                onGpsTimer = { minutes -> applyGpsTimer(minutes) },
             )
             Screen.TOOLS -> ToolsScreen(
                 firmwareVersion = firmware,
@@ -282,7 +337,87 @@ class MainActivity : ComponentActivity() {
 
     private fun persistProfile(next: BandProfile) {
         profile = next
-        prefs.edit().putString(KEY_BANDS, encodeProfile(next)).apply()
+        prefs.edit().putString(AirStore.KEY_BANDS, encodeProfile(next)).apply()
+    }
+
+    private fun updateWidgetPollutants(selected: Set<Pollutant>) {
+        widgetPollutants = selected
+        prefs.edit().putString(AirStore.KEY_WIDGET_POLLUTANTS, encodeWidgetSelection(selected)).apply()
+    }
+
+    private fun refreshDeviceSettings() {
+        if (bleManager.connectionState.value !is ConnectionState.Ready || deviceBusy) return
+        deviceBusy = true
+        deviceMessage = null
+        lifecycleScope.launch {
+            val pm = bleManager.execShell("pm", arrayOf("status"))
+            val gps = bleManager.execShell("gnss", arrayOf("status"))
+            pmStatus = if (pm.ok) parsePmStatus(pm.output) else pmStatus
+            gnssStatus = if (gps.ok) parseGnssStatus(gps.output) else gnssStatus
+            deviceMessage = when {
+                !pm.ok -> pm.output
+                pmStatus == null -> "Could not read PM settings"
+                !gps.ok -> gps.output
+                gnssStatus == null -> "Could not read GPS settings"
+                else -> null
+            }
+            deviceBusy = false
+        }
+    }
+
+    private fun applyPm(mode: PmMode, charging: Boolean) {
+        if (deviceBusy) return
+        deviceBusy = true
+        deviceMessage = null
+        lifecycleScope.launch {
+            val result = bleManager.execShell("pm", arrayOf("mode") + pmModeArgs(mode, charging))
+            deviceBusy = false
+            if (!result.ok) {
+                deviceMessage = result.output
+                return@launch
+            }
+            refreshDeviceSettings()
+        }
+    }
+
+    private fun applyGpsMode(mode: GnssMode) {
+        if (deviceBusy) return
+        deviceBusy = true
+        deviceMessage = null
+        lifecycleScope.launch {
+            val result = bleManager.execShell("gnss", arrayOf("mode") + gnssModeArg(mode))
+            if (result.ok && mode == GnssMode.TIMER) {
+                val minutes = gnssStatus?.let { gnssTimerEditor(it) } ?: 10
+                val timer = bleManager.execShell("gnss", arrayOf("timer") + gnssTimerArg(minutes))
+                deviceBusy = false
+                if (!timer.ok) {
+                    deviceMessage = timer.output
+                    return@launch
+                }
+            } else {
+                deviceBusy = false
+                if (!result.ok) {
+                    deviceMessage = result.output
+                    return@launch
+                }
+            }
+            refreshDeviceSettings()
+        }
+    }
+
+    private fun applyGpsTimer(minutes: Int) {
+        if (deviceBusy) return
+        deviceBusy = true
+        deviceMessage = null
+        lifecycleScope.launch {
+            val result = bleManager.execShell("gnss", arrayOf("timer") + gnssTimerArg(minutes))
+            deviceBusy = false
+            if (!result.ok) {
+                deviceMessage = result.output
+                return@launch
+            }
+            refreshDeviceSettings()
+        }
     }
 
     private fun connect(device: BluetoothDevice) {
@@ -379,13 +514,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private enum class Screen {
-        SCAN, DASHBOARD, HISTORY, SETTINGS, TOOLS
-    }
-
-    companion object {
-        private const val PREFS = "atmotube_air"
-        private const val KEY_ADDRESS = "last_address"
-        private const val KEY_NAME = "last_name"
-        private const val KEY_BANDS = "bands"
+        SCAN, DASHBOARD, HISTORY, SETTINGS, DEVICE, TOOLS
     }
 }

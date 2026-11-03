@@ -45,7 +45,9 @@ import com.atmotube.pro2.example.co2Metric
 import com.atmotube.pro2.example.defaultCuts
 import com.atmotube.pro2.example.errorLabels
 import com.atmotube.pro2.example.formatPm
+import com.atmotube.pro2.example.HourlyPm
 import com.atmotube.pro2.example.gpsHasFix
+import com.atmotube.pro2.example.pmCardFootnote
 import com.atmotube.pro2.example.noxMetric
 import com.atmotube.pro2.example.pm1Metric
 import com.atmotube.pro2.example.pm10Metric
@@ -64,6 +66,7 @@ fun DashboardScreen(
     reading: AtmotubeReading?,
     pmReading: AtmotubePmReading?,
     gpsReading: AtmotubeGpsReading?,
+    hourlyPm: HourlyPm?,
     historyPending: Boolean,
     hasHistory: Boolean,
     isDownloadingHistory: Boolean,
@@ -73,6 +76,7 @@ fun DashboardScreen(
     onSyncHistory: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDeviceSettings: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
     val locale = Locale.getDefault()
@@ -155,10 +159,12 @@ fun DashboardScreen(
                 MetricCard(
                     metric = pmReading?.let { pm25Metric(it.pm25, locale, cuts.getValue(Pollutant.PM25)) } ?: waitingMetric("PM2.5"),
                     modifier = Modifier.weight(1f),
+                    footnote = pmReading?.let { pmCardFootnote(it.pm25, hourlyPm?.pm25, locale) },
                 )
                 MetricCard(
                     metric = pmReading?.let { pm10Metric(it.pm10, locale, cuts.getValue(Pollutant.PM10)) } ?: waitingMetric("PM10"),
                     modifier = Modifier.weight(1f),
+                    footnote = pmReading?.let { pmCardFootnote(it.pm10, hourlyPm?.pm10, locale) },
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -166,6 +172,7 @@ fun DashboardScreen(
                 MetricCard(
                     metric = pmReading?.let { pm1Metric(it.pm1, locale, cuts.getValue(Pollutant.PM1)) } ?: waitingMetric("PM1"),
                     modifier = Modifier.weight(1f),
+                    footnote = pmReading?.let { pmCardFootnote(it.pm1, hourlyPm?.pm1, locale) },
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -229,6 +236,9 @@ fun DashboardScreen(
         }
         OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
             Text("Bands and alerts")
+        }
+        OutlinedButton(onClick = onOpenDeviceSettings, modifier = Modifier.fillMaxWidth()) {
+            Text("Device settings")
         }
         TextButton(onClick = onOpenTools, modifier = Modifier.fillMaxWidth()) {
             Text("Device tools")
