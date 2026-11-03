@@ -5,16 +5,18 @@ import java.util.Locale
 /**
  * Consumer reading of a live Atmotube sample.
  *
- * CO2 cuts are common indoor guidance (800 / 1,000 / 1,500 ppm), not a medical scale.
- * PM2.5 follows US EPA breakpoints, with Unhealthy and above collapsed into [AirLevel.VERY_POOR].
- * VOC and NOx indexes are relative (Sensirion): 100 is a typical VOC index, 1 is the NOx clean-air baseline.
+ * PM2.5 and PM10 use the EU European Air Quality Index hourly bands (EEA), in µg/m³.
+ * The index is the worse of those two. CO2, VOC, and NOx are not EAQI pollutants:
+ * CO2 is ppm, VOC is an index plus ppb, and NOx is the Sensirion index.
  */
 enum class AirLevel {
     UNKNOWN,
     GOOD,
     FAIR,
+    MODERATE,
     POOR,
     VERY_POOR,
+    EXTREMELY_POOR,
 }
 
 data class Metric(
@@ -39,7 +41,7 @@ data class ClimateReadout(
 )
 
 const val BANDS_NOTE =
-    "CO2 uses common indoor bands (800 / 1,000 / 1,500 ppm). PM2.5 uses US EPA breakpoints, with the upper categories grouped as Very poor. VOC and NOx indexes are relative to recent air."
+    "EU European Air Quality Index, hourly bands in µg/m³. The category is the worse of PM2.5 and PM10. CO2 (ppm), VOC, and NOx are not part of the index. Temperature is °C and pressure is hPa."
 
 private const val FLAG_CO2_ERROR = 1 shl 3
 private const val FLAG_MOTION = 1 shl 12
@@ -58,19 +60,41 @@ private data class Interpreted(
 fun levelLabel(level: AirLevel): String = when (level) {
     AirLevel.UNKNOWN -> "Unavailable"
     AirLevel.GOOD -> "Good"
-    AirLevel.FAIR -> "Moderate"
+    AirLevel.FAIR -> "Fair"
+    AirLevel.MODERATE -> "Moderate"
     AirLevel.POOR -> "Poor"
     AirLevel.VERY_POOR -> "Very poor"
+    AirLevel.EXTREMELY_POOR -> "Extremely poor"
 }
 
-fun co2Metric(ppm: Int, locale: Locale = Locale.getDefault()): Metric =
-    countMetric("CO2", "ppm", interpretCo2(ppm), locale) { levelLabel(it) }
+fun co2Metric(ppm: Int, locale: Locale = Locale.getDefault()): Metric {
+    val reading = interpretCo2(ppm)
+    return when (reading.kind) {
+        Kind.OFF -> Metric("CO2", "Off", "", AirLevel.UNKNOWN, "Sensor off")
+        Kind.HEATING -> Metric("CO2", "Heating", "", AirLevel.UNKNOWN, "Warming up")
+        Kind.MISSING -> Metric("CO2", "—", "", AirLevel.UNKNOWN, "No reading")
+        Kind.VALUE -> Metric("CO2", formatGrouped(reading.number!!.toInt(), locale), "ppm", AirLevel.UNKNOWN, "Indoor")
+    }
+}
 
 fun pm25Metric(micrograms: Double, locale: Locale = Locale.getDefault()): Metric =
     countMetric("PM2.5", "µg/m³", interpretPm25(micrograms), locale) { levelLabel(it) }
 
+fun pm10Metric(micrograms: Double, locale: Locale = Locale.getDefault()): Metric =
+    countMetric("PM10", "µg/m³", interpretPm10(micrograms), locale) { levelLabel(it) }
+
+fun pm1Metric(micrograms: Double, locale: Locale = Locale.getDefault()): Metric {
+    val reading = interpretMass(micrograms)
+    return when (reading.kind) {
+        Kind.OFF -> Metric("PM1", "Off", "", AirLevel.UNKNOWN, "Sensor off")
+        Kind.HEATING -> Metric("PM1", "Heating", "", AirLevel.UNKNOWN, "Warming up")
+        Kind.MISSING -> Metric("PM1", "—", "", AirLevel.UNKNOWN, "No reading")
+        Kind.VALUE -> Metric("PM1", formatFixed(reading.number!!, 1, locale), "µg/m³", AirLevel.UNKNOWN, "No EAQI band")
+    }
+}
+
 fun vocMetric(index: Int, ppb: Int, locale: Locale = Locale.getDefault()): Metric {
-    val indexReading = interpretIndex(index, ::vocLevel)
+    val indexReading = interpretIndex(index)
     val ppbText = optionalGrouped(ppb, locale)?.let { "$it ppb" }
     return when (indexReading.kind) {
         Kind.OFF -> Metric("VOC", "Off", "", AirLevel.UNKNOWN, "Sensor off")
@@ -87,7 +111,7 @@ fun vocMetric(index: Int, ppb: Int, locale: Locale = Locale.getDefault()): Metri
 }
 
 fun noxMetric(index: Int, locale: Locale = Locale.getDefault()): Metric {
-    val reading = interpretIndex(index, ::noxLevel)
+    val reading = interpretIndex(index)
     return when (reading.kind) {
         Kind.OFF -> Metric("NOx", "Off", "", AirLevel.UNKNOWN, "Sensor off")
         Kind.HEATING -> Metric("NOx", "Heating", "", AirLevel.UNKNOWN, "Warming up")
@@ -103,46 +127,41 @@ fun noxMetric(index: Int, locale: Locale = Locale.getDefault()): Metric {
 }
 
 fun summarize(
-    co2Ppm: Int?,
     pm25: Double?,
+    pm10: Double?,
     locale: Locale = Locale.getDefault(),
 ): AirSummary {
-    val co2 = interpretCo2(co2Ppm)
-    val pm = if (pm25 == null) Interpreted(Kind.MISSING) else interpretPm25(pm25)
-    val co2Rank = rank(co2.level)
-    val pmRank = rank(pm.level)
+    val fine = if (pm25 == null) Interpreted(Kind.MISSING) else interpretPm25(pm25)
+    val coarse = if (pm10 == null) Interpreted(Kind.MISSING) else interpretPm10(pm10)
 
-    if (co2.kind != Kind.VALUE && pm.kind != Kind.VALUE) {
-        val warming = co2.kind == Kind.HEATING || pm.kind == Kind.HEATING
+    if (fine.kind != Kind.VALUE && coarse.kind != Kind.VALUE) {
+        val warming = fine.kind == Kind.HEATING || coarse.kind == Kind.HEATING
         return AirSummary(
-            title = if (warming) "Sensors are warming up" else "Waiting for sensors",
+            title = if (warming) "Sensors are warming up" else "Waiting for particles",
             detail = when {
-                co2.kind == Kind.HEATING -> "CO2 will appear once the sensor is warm."
-                pm.kind == Kind.HEATING -> "Particle data will appear once the sensor is warm."
-                co2.kind == Kind.OFF && pm.kind == Kind.OFF -> "CO2 and the particle sensor are off."
-                else -> "Readings show up a moment after the device is ready."
+                warming -> "PM2.5 and PM10 will appear once the sensor is warm."
+                fine.kind == Kind.OFF || coarse.kind == Kind.OFF -> "The particle sensor is off."
+                else -> "The EU index needs a PM2.5 or PM10 reading."
             },
             level = AirLevel.UNKNOWN,
         )
     }
 
-    val co2Up = co2.kind == Kind.VALUE && co2Rank >= rank(AirLevel.FAIR)
-    val pmUp = pm.kind == Kind.VALUE && pmRank >= rank(AirLevel.FAIR)
-    if (co2Up && pmUp && co2.level == pm.level) {
+    if (fine.kind == Kind.VALUE && coarse.kind == Kind.VALUE && fine.level == coarse.level) {
         return AirSummary(
-            title = "CO2 and particles are both up",
-            detail = "${formatGrouped(co2.number!!.toInt(), locale)} ppm CO2 · ${formatFixed(pm.number!!, 1, locale)} µg/m³ PM2.5.",
-            level = co2.level,
+            title = levelLabel(fine.level),
+            detail = "PM2.5 ${formatFixed(fine.number!!, 1, locale)} µg/m³ · PM10 ${formatFixed(coarse.number!!, 1, locale)} µg/m³.",
+            level = fine.level,
         )
     }
 
-    if (co2.kind == Kind.VALUE && co2Rank >= pmRank) {
-        return co2Summary(co2, pm, locale)
+    val fineRank = rank(fine.level)
+    val coarseRank = rank(coarse.level)
+    return if (fine.kind == Kind.VALUE && fineRank >= coarseRank) {
+        drivenBy("PM2.5", fine, coarse, locale)
+    } else {
+        drivenBy("PM10", coarse, fine, locale)
     }
-    if (pm.kind == Kind.VALUE) {
-        return pmSummary(pm, co2, locale)
-    }
-    return co2Summary(co2, pm, locale)
 }
 
 fun climateReadout(
@@ -236,44 +255,20 @@ fun downsample(values: List<Float>, maxPoints: Int = 160): List<Float> {
 
 fun isCo2Error(flags: Int): Boolean = flags and FLAG_CO2_ERROR != 0
 
-private fun co2Summary(co2: Interpreted, pm: Interpreted, locale: Locale): AirSummary {
-    val ppm = formatGrouped(co2.number!!.toInt(), locale)
-    val (title, detail) = when (co2.level) {
-        AirLevel.GOOD -> if (pm.kind == Kind.VALUE) {
-            "Air looks good" to "CO2 and fine particles are in a comfortable range."
-        } else {
-            "CO2 looks good" to missingPmDetail(pm)
-        }
-        AirLevel.FAIR -> "CO2 is a little high" to "$ppm ppm. A bit of fresh air would bring it down."
-        AirLevel.POOR -> "CO2 is building up" to "$ppm ppm. Opening a window helps."
-        AirLevel.VERY_POOR -> "CO2 is high" to "$ppm ppm. Ventilate this room."
-        AirLevel.UNKNOWN -> "Waiting for sensors" to "Readings show up a moment after the device is ready."
+private fun drivenBy(
+    name: String,
+    driver: Interpreted,
+    other: Interpreted,
+    locale: Locale,
+): AirSummary {
+    val value = formatFixed(driver.number!!, 1, locale)
+    val extra = when (other.kind) {
+        Kind.HEATING -> " The other fraction is still warming up."
+        Kind.OFF -> " The other fraction is off."
+        Kind.MISSING -> " The other fraction is not in yet."
+        Kind.VALUE -> ""
     }
-    return AirSummary(title, detail, co2.level)
-}
-
-private fun pmSummary(pm: Interpreted, co2: Interpreted, locale: Locale): AirSummary {
-    val value = formatFixed(pm.number!!, 1, locale)
-    val (title, detail) = when (pm.level) {
-        AirLevel.GOOD -> "Fine particles look good" to missingCo2Detail(co2)
-        AirLevel.FAIR -> "Fine particles are a bit elevated" to "PM2.5 is $value µg/m³."
-        AirLevel.POOR -> "Fine particles are elevated" to "PM2.5 is $value µg/m³."
-        AirLevel.VERY_POOR -> "Fine particles are high" to "PM2.5 is $value µg/m³."
-        AirLevel.UNKNOWN -> "Waiting for sensors" to "Readings show up a moment after the device is ready."
-    }
-    return AirSummary(title, detail, pm.level)
-}
-
-private fun missingPmDetail(pm: Interpreted): String = when (pm.kind) {
-    Kind.HEATING -> "The particle sensor is still warming up."
-    Kind.OFF -> "The particle sensor is off."
-    else -> "Particle data is not in yet."
-}
-
-private fun missingCo2Detail(co2: Interpreted): String = when (co2.kind) {
-    Kind.HEATING -> "The CO2 sensor is still warming up."
-    Kind.OFF -> "The CO2 sensor is off."
-    else -> "CO2 is not in yet."
+    return AirSummary(levelLabel(driver.level), "$name is $value µg/m³.$extra", driver.level)
 }
 
 private fun countMetric(
@@ -300,37 +295,47 @@ private fun interpretCo2(ppm: Int?): Interpreted {
     if (ppm == null) return Interpreted(Kind.MISSING)
     sentinel(ppm.toDouble())?.let { return it }
     if (ppm <= 0) return Interpreted(Kind.MISSING)
-    val level = when {
-        ppm < 800 -> AirLevel.GOOD
-        ppm < 1_000 -> AirLevel.FAIR
-        ppm < 1_500 -> AirLevel.POOR
-        else -> AirLevel.VERY_POOR
-    }
-    return Interpreted(Kind.VALUE, level, ppm.toDouble())
+    return Interpreted(Kind.VALUE, AirLevel.UNKNOWN, ppm.toDouble())
 }
 
-private fun interpretPm25(micrograms: Double): Interpreted {
+private fun interpretPm25(micrograms: Double): Interpreted = interpretBand(micrograms, ::eaqiPm25)
+
+private fun interpretPm10(micrograms: Double): Interpreted = interpretBand(micrograms, ::eaqiPm10)
+
+private fun interpretMass(micrograms: Double): Interpreted {
     sentinel(micrograms)?.let { return it }
-    val level = when {
-        micrograms <= 12.0 -> AirLevel.GOOD
-        micrograms <= 35.4 -> AirLevel.FAIR
-        micrograms <= 55.4 -> AirLevel.POOR
-        else -> AirLevel.VERY_POOR
-    }
-    return Interpreted(Kind.VALUE, level, micrograms)
+    return Interpreted(Kind.VALUE, AirLevel.UNKNOWN, micrograms)
 }
 
-private fun interpretIndex(index: Int, levelOf: (Int) -> AirLevel): Interpreted {
+private fun interpretBand(micrograms: Double, band: (Double) -> AirLevel): Interpreted {
+    sentinel(micrograms)?.let { return it }
+    return Interpreted(Kind.VALUE, band(micrograms), micrograms)
+}
+
+/** EEA hourly bands: 0–5, 6–15, 16–50, 51–90, 91–140, above 140 µg/m³. */
+private fun eaqiPm25(micrograms: Double): AirLevel = when {
+    micrograms < 6 -> AirLevel.GOOD
+    micrograms < 16 -> AirLevel.FAIR
+    micrograms < 51 -> AirLevel.MODERATE
+    micrograms < 91 -> AirLevel.POOR
+    micrograms < 141 -> AirLevel.VERY_POOR
+    else -> AirLevel.EXTREMELY_POOR
+}
+
+/** EEA hourly bands: 0–15, 16–45, 46–120, 121–195, 196–270, above 270 µg/m³. */
+private fun eaqiPm10(micrograms: Double): AirLevel = when {
+    micrograms < 16 -> AirLevel.GOOD
+    micrograms < 46 -> AirLevel.FAIR
+    micrograms < 121 -> AirLevel.MODERATE
+    micrograms < 196 -> AirLevel.POOR
+    micrograms < 271 -> AirLevel.VERY_POOR
+    else -> AirLevel.EXTREMELY_POOR
+}
+
+private fun interpretIndex(index: Int): Interpreted {
     sentinel(index.toDouble())?.let { return it }
     if (index <= 0) return Interpreted(Kind.MISSING)
-    return Interpreted(Kind.VALUE, levelOf(index), index.toDouble())
-}
-
-private fun vocLevel(index: Int): AirLevel = when {
-    index <= 120 -> AirLevel.GOOD
-    index <= 200 -> AirLevel.FAIR
-    index <= 300 -> AirLevel.POOR
-    else -> AirLevel.VERY_POOR
+    return Interpreted(Kind.VALUE, AirLevel.UNKNOWN, index.toDouble())
 }
 
 private fun vocCaption(index: Int): String = when {
@@ -339,13 +344,6 @@ private fun vocCaption(index: Int): String = when {
     index <= 200 -> "Elevated"
     index <= 300 -> "High"
     else -> "Very high"
-}
-
-private fun noxLevel(index: Int): AirLevel = when {
-    index <= 1 -> AirLevel.GOOD
-    index <= 20 -> AirLevel.FAIR
-    index <= 100 -> AirLevel.POOR
-    else -> AirLevel.VERY_POOR
 }
 
 private fun noxCaption(index: Int): String = when {
@@ -389,6 +387,8 @@ private fun rank(level: AirLevel): Int = when (level) {
     AirLevel.UNKNOWN -> 0
     AirLevel.GOOD -> 1
     AirLevel.FAIR -> 2
-    AirLevel.POOR -> 3
-    AirLevel.VERY_POOR -> 4
+    AirLevel.MODERATE -> 3
+    AirLevel.POOR -> 4
+    AirLevel.VERY_POOR -> 5
+    AirLevel.EXTREMELY_POOR -> 6
 }

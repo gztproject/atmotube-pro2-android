@@ -44,6 +44,8 @@ import com.atmotube.pro2.example.errorLabels
 import com.atmotube.pro2.example.formatPm
 import com.atmotube.pro2.example.gpsHasFix
 import com.atmotube.pro2.example.noxMetric
+import com.atmotube.pro2.example.pm1Metric
+import com.atmotube.pro2.example.pm10Metric
 import com.atmotube.pro2.example.pm25Metric
 import com.atmotube.pro2.example.statusLabels
 import com.atmotube.pro2.example.summarize
@@ -68,7 +70,7 @@ fun DashboardScreen(
     onOpenTools: () -> Unit,
 ) {
     val locale = Locale.getDefault()
-    val summary = summarize(reading?.co2Ppm, pmReading?.pm25, locale)
+    val summary = summarize(pmReading?.pm25, pmReading?.pm10, locale)
     val climate = reading?.let {
         climateReadout(it.temperature, it.humidity, it.pressure, it.errorFlags, locale)
     }
@@ -143,14 +145,20 @@ fun DashboardScreen(
             )
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                MetricCard(
+                    metric = pmReading?.let { pm25Metric(it.pm25, locale) } ?: waitingMetric("PM2.5"),
+                    modifier = Modifier.weight(1f),
+                )
+                MetricCard(
+                    metric = pmReading?.let { pm10Metric(it.pm10, locale) } ?: waitingMetric("PM10"),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 MetricCard(co2Metric(reading.co2Ppm, locale), Modifier.weight(1f))
                 MetricCard(
-                    metric = pmReading?.let { pm25Metric(it.pm25, locale) }
-                        ?: Metric("PM2.5", "—", "", com.atmotube.pro2.example.AirLevel.UNKNOWN, "Waiting"),
+                    metric = pmReading?.let { pm1Metric(it.pm1, locale) } ?: waitingMetric("PM1"),
                     modifier = Modifier.weight(1f),
-                    footnote = pmReading?.let {
-                        "PM1 ${formatPm(it.pm1, locale)} · PM10 ${formatPm(it.pm10, locale)}"
-                    },
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -228,6 +236,11 @@ private fun SummaryCard(summary: com.atmotube.pro2.example.AirSummary) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
+                "EU air quality index",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
                 text = summary.title,
                 style = MaterialTheme.typography.headlineSmall,
                 color = summary.level.indicator(),
@@ -245,7 +258,7 @@ private fun MetricCard(metric: Metric, modifier: Modifier, footnote: String? = n
                 modifier = Modifier
                     .width(6.dp)
                     .fillMaxHeight()
-                    .background(metric.level.indicator()),
+                    .background(metric.level.band()),
             )
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
@@ -319,6 +332,9 @@ private fun ParticleCard(pm: AtmotubePmReading, locale: Locale) {
         }
     }
 }
+
+@Composable
+private fun waitingMetric(label: String) = Metric(label, "—", "µg/m³", com.atmotube.pro2.example.AirLevel.UNKNOWN, "Waiting")
 
 @Composable
 private fun AirLevelColor(level: com.atmotube.pro2.example.AirLevel) = level.indicator()

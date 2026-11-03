@@ -49,14 +49,29 @@ fun AtmotubeAirTheme(content: @Composable () -> Unit) {
     )
 }
 
+/** Official EAQI swatches, used for the category bar. */
+@Composable
+fun AirLevel.band(): Color = when (this) {
+    AirLevel.GOOD -> Color(0xFF50F0E6)
+    AirLevel.FAIR -> Color(0xFF50CCAA)
+    AirLevel.MODERATE -> Color(0xFFF0E641)
+    AirLevel.POOR -> Color(0xFFFF5050)
+    AirLevel.VERY_POOR -> Color(0xFF960032)
+    AirLevel.EXTREMELY_POOR -> Color(0xFF7D2181)
+    AirLevel.UNKNOWN -> if (isSystemInDarkTheme()) Color(0xFFB7B2A8) else Color(0xFF8A847A)
+}
+
+/** Darker text colors so the EAQI name stays readable on a light card. */
 @Composable
 fun AirLevel.indicator(): Color {
     val dark = isSystemInDarkTheme()
     return when (this) {
-        AirLevel.GOOD -> if (dark) Color(0xFF6FCF97) else Color(0xFF1F8A4C)
-        AirLevel.FAIR -> if (dark) Color(0xFFE6C15A) else Color(0xFF8A6A00)
-        AirLevel.POOR -> if (dark) Color(0xFFF0A36A) else Color(0xFFC45A12)
-        AirLevel.VERY_POOR -> if (dark) Color(0xFFFF8A80) else Color(0xFFC4382D)
+        AirLevel.GOOD -> if (dark) Color(0xFF50F0E6) else Color(0xFF0B6E66)
+        AirLevel.FAIR -> if (dark) Color(0xFF50CCAA) else Color(0xFF0E6B52)
+        AirLevel.MODERATE -> if (dark) Color(0xFFF0E641) else Color(0xFF8A6A00)
+        AirLevel.POOR -> if (dark) Color(0xFFFF8A80) else Color(0xFFC4382D)
+        AirLevel.VERY_POOR -> if (dark) Color(0xFFFF8A9A) else Color(0xFF960032)
+        AirLevel.EXTREMELY_POOR -> if (dark) Color(0xFFE08BE4) else Color(0xFF7D2181)
         AirLevel.UNKNOWN -> if (dark) Color(0xFFB7B2A8) else Color(0xFF8A847A)
     }
 }
