@@ -35,11 +35,14 @@ import com.atmotube.pro2.example.AtmotubeGpsReading
 import com.atmotube.pro2.example.AtmotubePmReading
 import com.atmotube.pro2.example.AtmotubeReading
 import com.atmotube.pro2.example.BANDS_NOTE
+import com.atmotube.pro2.example.BandProfile
 import com.atmotube.pro2.example.ConnectionState
 import com.atmotube.pro2.example.Metric
+import com.atmotube.pro2.example.Pollutant
 import com.atmotube.pro2.example.batteryLabel
 import com.atmotube.pro2.example.climateReadout
 import com.atmotube.pro2.example.co2Metric
+import com.atmotube.pro2.example.defaultCuts
 import com.atmotube.pro2.example.errorLabels
 import com.atmotube.pro2.example.formatPm
 import com.atmotube.pro2.example.gpsHasFix
@@ -47,6 +50,7 @@ import com.atmotube.pro2.example.noxMetric
 import com.atmotube.pro2.example.pm1Metric
 import com.atmotube.pro2.example.pm10Metric
 import com.atmotube.pro2.example.pm25Metric
+import com.atmotube.pro2.example.pollutantValues
 import com.atmotube.pro2.example.statusLabels
 import com.atmotube.pro2.example.summarize
 import com.atmotube.pro2.example.vocMetric
@@ -65,12 +69,15 @@ fun DashboardScreen(
     isDownloadingHistory: Boolean,
     onDisconnect: () -> Unit,
     onReconnect: () -> Unit,
+    profile: BandProfile,
     onSyncHistory: () -> Unit,
     onOpenHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenTools: () -> Unit,
 ) {
     val locale = Locale.getDefault()
-    val summary = summarize(pmReading?.pm25, pmReading?.pm10, locale)
+    val cuts = profile.cuts
+    val summary = summarize(pollutantValues(reading, pmReading), locale, cuts)
     val climate = reading?.let {
         climateReadout(it.temperature, it.humidity, it.pressure, it.errorFlags, locale)
     }
@@ -146,24 +153,24 @@ fun DashboardScreen(
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 MetricCard(
-                    metric = pmReading?.let { pm25Metric(it.pm25, locale) } ?: waitingMetric("PM2.5"),
+                    metric = pmReading?.let { pm25Metric(it.pm25, locale, cuts.getValue(Pollutant.PM25)) } ?: waitingMetric("PM2.5"),
                     modifier = Modifier.weight(1f),
                 )
                 MetricCard(
-                    metric = pmReading?.let { pm10Metric(it.pm10, locale) } ?: waitingMetric("PM10"),
+                    metric = pmReading?.let { pm10Metric(it.pm10, locale, cuts.getValue(Pollutant.PM10)) } ?: waitingMetric("PM10"),
                     modifier = Modifier.weight(1f),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                MetricCard(co2Metric(reading.co2Ppm, locale), Modifier.weight(1f))
+                MetricCard(co2Metric(reading.co2Ppm, locale, cuts[Pollutant.CO2] ?: defaultCuts(Pollutant.CO2)), Modifier.weight(1f))
                 MetricCard(
-                    metric = pmReading?.let { pm1Metric(it.pm1, locale) } ?: waitingMetric("PM1"),
+                    metric = pmReading?.let { pm1Metric(it.pm1, locale, cuts.getValue(Pollutant.PM1)) } ?: waitingMetric("PM1"),
                     modifier = Modifier.weight(1f),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                MetricCard(vocMetric(reading.vocIndex, reading.vocPpb, locale), Modifier.weight(1f))
-                MetricCard(noxMetric(reading.noxIndex, locale), Modifier.weight(1f))
+                MetricCard(vocMetric(reading.vocIndex, reading.vocPpb, locale, cuts.getValue(Pollutant.VOC)), Modifier.weight(1f))
+                MetricCard(noxMetric(reading.noxIndex, locale, cuts.getValue(Pollutant.NOX)), Modifier.weight(1f))
             }
             if (climate != null) {
                 ClimateRow(climate)
@@ -220,6 +227,9 @@ fun DashboardScreen(
                 Text("View history")
             }
         }
+        OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+            Text("Bands and alerts")
+        }
         TextButton(onClick = onOpenTools, modifier = Modifier.fillMaxWidth()) {
             Text("Device tools")
         }
@@ -236,7 +246,7 @@ private fun SummaryCard(summary: com.atmotube.pro2.example.AirSummary) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "EU air quality index",
+                "Air quality",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.atmotube.pro2.example.ui.AtmotubeAirTheme
@@ -34,6 +35,7 @@ import com.atmotube.pro2.example.ui.DashboardScreen
 import com.atmotube.pro2.example.ui.FoundDevice
 import com.atmotube.pro2.example.ui.HistoryScreen
 import com.atmotube.pro2.example.ui.ScanScreen
+import com.atmotube.pro2.example.ui.SettingsScreen
 import com.atmotube.pro2.example.ui.ToolsScreen
 import kotlinx.coroutines.launch
 import no.nordicsemi.android.support.v18.scanner.BluetoothLeScannerCompat
@@ -47,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var bleManager: AtmotubeBleManager
     private lateinit var historyManager: HistoryManager
     private lateinit var prefs: SharedPreferences
+    private lateinit var alerts: AirAlerts
 
     private val scannedDevices = mutableStateListOf<FoundDevice>()
     private var isScanning by mutableStateOf(false)
@@ -57,6 +60,10 @@ class MainActivity : ComponentActivity() {
     private var historyPending by mutableStateOf(false)
     private var history by mutableStateOf<List<HistoryMeasurement>>(emptyList())
     private var historyFile by mutableStateOf<File?>(null)
+    private var profile by mutableStateOf(defaultProfile())
+    private var previousLevels by mutableStateOf<Map<Pollutant, AirLevel>>(emptyMap())
+    private var previousAlertEnabled by mutableStateOf<Map<Pollutant, Boolean>>(emptyMap())
+    private var pendingProfile: BandProfile? = null
     private var permissionRequestInFlight = false
     private var autoPrompted = false
 
@@ -88,12 +95,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val pending = pendingProfile
+        pendingProfile = null
+        if (pending == null) return@registerForActivityResult
+        if (granted) {
+            persistProfile(pending)
+        } else {
+            persistProfile(pending.copy(alerts = pending.alerts.mapValues { (_, alert) -> alert.copy(enabled = false) }))
+            Toast.makeText(this, "Notifications stay off until you allow them", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         lastAddress = prefs.getString(KEY_ADDRESS, null)
+        profile = decodeProfile(prefs.getString(KEY_BANDS, null))
+        alerts = AirAlerts(this)
         bleManager = AtmotubeBleManager(this, lifecycleScope)
         historyManager = HistoryManager(this, bleManager)
 
@@ -165,7 +188,24 @@ class MainActivity : ComponentActivity() {
             bleManager.historyReady.collect { historyPending = true }
         }
 
-        BackHandler(enabled = currentScreen == Screen.HISTORY || currentScreen == Screen.TOOLS) {
+        LaunchedEffect(reading, pmReading, profile) {
+            val snapshots = pollutantSnapshots(reading, pmReading, profile.cuts)
+            val current = snapshots.mapValues { it.value.level }
+            val previousForAlerts = Pollutant.entries.associateWith { pollutant ->
+                val nowEnabled = profile.alerts[pollutant]?.enabled == true
+                val wasEnabled = previousAlertEnabled[pollutant] == true
+                if (nowEnabled && !wasEnabled) AirLevel.UNKNOWN else previousLevels[pollutant] ?: AirLevel.UNKNOWN
+            }
+            crossingAlerts(previousForAlerts, current, profile.alerts).forEach { pollutant ->
+                val text = snapshots[pollutant]?.valueText ?: return@forEach
+                alerts.notify(pollutant, current.getValue(pollutant), text)
+            }
+            recoveredAlerts(previousLevels, current, profile.alerts).forEach { alerts.cancel(it) }
+            previousLevels = current
+            previousAlertEnabled = profile.alerts.mapValues { it.value.enabled }
+        }
+
+        BackHandler(enabled = currentScreen == Screen.HISTORY || currentScreen == Screen.TOOLS || currentScreen == Screen.SETTINGS) {
             currentScreen = Screen.DASHBOARD
         }
 
@@ -189,6 +229,7 @@ class MainActivity : ComponentActivity() {
                 historyPending = historyPending,
                 hasHistory = history.isNotEmpty(),
                 isDownloadingHistory = isDownloadingHistory,
+                profile = profile,
                 onDisconnect = {
                     bleManager.disconnect().enqueue()
                     currentScreen = Screen.SCAN
@@ -196,6 +237,7 @@ class MainActivity : ComponentActivity() {
                 onReconnect = { activeDevice?.let { connect(it) } },
                 onSyncHistory = { downloadHistory(openWhenDone = true) },
                 onOpenHistory = { currentScreen = Screen.HISTORY },
+                onOpenSettings = { currentScreen = Screen.SETTINGS },
                 onOpenTools = { currentScreen = Screen.TOOLS },
             )
             Screen.HISTORY -> HistoryScreen(
@@ -206,6 +248,11 @@ class MainActivity : ComponentActivity() {
                 onShare = { historyFile?.let { shareHistory(it) } },
                 onSync = { downloadHistory(openWhenDone = false) },
             )
+            Screen.SETTINGS -> SettingsScreen(
+                profile = profile,
+                onBack = { currentScreen = Screen.DASHBOARD },
+                onSave = { saveProfile(it) },
+            )
             Screen.TOOLS -> ToolsScreen(
                 firmwareVersion = firmware,
                 commandLogs = logs,
@@ -214,6 +261,28 @@ class MainActivity : ComponentActivity() {
                 onBack = { currentScreen = Screen.DASHBOARD },
             )
         }
+    }
+
+    private fun saveProfile(next: BandProfile) {
+        val wantsAlerts = next.alerts.values.any { it.enabled }
+        if (
+            wantsAlerts &&
+            Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingProfile = next
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        if (wantsAlerts && !alerts.canPost()) {
+            Toast.makeText(this, "Allow notifications for Atmotube Air to get alerts", Toast.LENGTH_LONG).show()
+        }
+        persistProfile(next)
+    }
+
+    private fun persistProfile(next: BandProfile) {
+        profile = next
+        prefs.edit().putString(KEY_BANDS, encodeProfile(next)).apply()
     }
 
     private fun connect(device: BluetoothDevice) {
@@ -310,12 +379,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private enum class Screen {
-        SCAN, DASHBOARD, HISTORY, TOOLS
+        SCAN, DASHBOARD, HISTORY, SETTINGS, TOOLS
     }
 
     companion object {
         private const val PREFS = "atmotube_air"
         private const val KEY_ADDRESS = "last_address"
         private const val KEY_NAME = "last_name"
+        private const val KEY_BANDS = "bands"
     }
 }
