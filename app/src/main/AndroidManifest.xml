@@ -10,6 +10,7 @@
     <!-- Android 12+ permissions -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -22,8 +23,9 @@
         android:theme="@style/Theme.AtmotubePRO2Example" >
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden"
             android:exported="true"
-            android:label="Atmotube Sample"
+            android:label="@string/app_name"
             android:theme="@style/Theme.AtmotubePRO2Example">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -31,6 +33,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".AirWidgetProvider"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/air_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

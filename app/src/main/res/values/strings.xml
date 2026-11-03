@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">Atmotube PRO2 example</string>
+    <string name="app_name">Atmotube Air</string>
+    <string name="widget_description">Current readings for the pollutants you pick.</string>
 </resources>

@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Atmotube Air"
+        android:textColor="#1C1B19"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="6dp"
+        android:textColor="#5E594F"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/widget_row_0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_label_0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#5E594F"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_value_0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#1C1B19"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_detail_0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_label_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#5E594F"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_value_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#1C1B19"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_detail_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_label_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#5E594F"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_value_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#1C1B19"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_detail_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_label_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#5E594F"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_value_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#1C1B19"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_detail_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_4"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_label_4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#5E594F"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_value_4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#1C1B19"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_detail_4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row_5"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_label_5"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#5E594F"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_value_5"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#1C1B19"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_detail_5"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+    </LinearLayout>
+</LinearLayout>

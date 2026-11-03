@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import no.nordicsemi.android.ble.BleManager
 import no.nordicsemi.android.ble.observer.ConnectionObserver
 import no.nordicsemi.android.mcumgr.McuMgrTransport
@@ -64,6 +67,9 @@ class AtmotubeBleManager(
     private val _isNewPmFormat = MutableStateFlow<Boolean?>(null)
     val isNewPmFormat: StateFlow<Boolean?> = _isNewPmFormat.asStateFlow()
 
+    private val _firmwareVersion = MutableStateFlow<String?>(null)
+    val firmwareVersion: StateFlow<String?> = _firmwareVersion.asStateFlow()
+
     /** Emits every time the device pushes a "new history available" notification. */
     private val _historyReady = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val historyReady: SharedFlow<Unit> = _historyReady.asSharedFlow()
@@ -73,6 +79,7 @@ class AtmotubeBleManager(
 
     private var transport: McuMgrBleTransport? = null
     private var shellManager: ShellManager? = null
+    private val shellLock = Mutex()
 
     init {
         connectionObserver = object : ConnectionObserver {
@@ -167,17 +174,16 @@ class AtmotubeBleManager(
      * readings can be trusted.
      */
     private fun fetchFirmwareVersion() {
-        val mgr = shellManager ?: return
-        scope.launch(Dispatchers.IO) {
-            try {
-                val response = mgr.exec("version", arrayOf("app"))
-                if (response.ret.toInt() == 0) {
-                    val fw = response.o.removePrefix("version app").trim()
-                    _isNewPmFormat.value = checkFwNew(PM_NEW_FORMAT_FW.first, PM_NEW_FORMAT_FW.second, PM_NEW_FORMAT_FW.third, fw)
-                    logCommand("FW: $fw")
-                }
-            } catch (e: Exception) {
-                logCommand("FW read error: ${e.message}")
+        scope.launch {
+            val result = execShell("version", arrayOf("app"))
+            if (!result.ok) return@launch
+            val fw = parseFirmwareVersion(result.output)
+            if (fw != null) {
+                _firmwareVersion.value = fw
+                _isNewPmFormat.value = checkFwNew(PM_NEW_FORMAT_FW.first, PM_NEW_FORMAT_FW.second, PM_NEW_FORMAT_FW.third, fw)
+                logCommand("FW: $fw")
+            } else {
+                logCommand("FW read error: ${result.output.trim()}")
             }
         }
     }
@@ -185,6 +191,11 @@ class AtmotubeBleManager(
     fun getTransport(): McuMgrTransport? = transport
 
     fun connectToDevice(device: BluetoothDevice) {
+        _latestReading.value = null
+        _pmReading.value = null
+        _gpsReading.value = null
+        _firmwareVersion.value = null
+        _isNewPmFormat.value = null
         connect(device)
             .retry(3, 100)
             .useAutoConnect(false)
@@ -192,23 +203,32 @@ class AtmotubeBleManager(
     }
 
     fun sendShellCommand(command: String) {
-        val mgr = shellManager ?: return
-        logCommand("Cmd: $command")
-        
-        scope.launch(Dispatchers.IO) {
-            try {
-                val parts = command.split(" ")
-                val cmd = parts[0]
-                val args = if (parts.size > 1) parts.drop(1).toTypedArray() else emptyArray()
-                
-                val response = mgr.exec(cmd, args)
-                if (response.ret.toInt() == 0) {
-                     logCommand("Resp: ${response.o}")
-                } else {
-                     logCommand("Error RC: ${response.ret}")
+        val parts = command.split(" ").filter { it.isNotBlank() }
+        if (parts.isEmpty()) return
+        scope.launch {
+            execShell(parts[0], parts.drop(1).toTypedArray())
+        }
+    }
+
+    suspend fun execShell(command: String, args: Array<String> = emptyArray()): ShellResult {
+        val mgr = shellManager ?: return ShellResult(false, "Not connected")
+        return shellLock.withLock {
+            withContext(Dispatchers.IO) {
+                val shown = (listOf(command) + args).joinToString(" ")
+                try {
+                    logCommand("Cmd: $shown")
+                    val response = mgr.exec(command, args)
+                    if (response.ret == 0) {
+                        logCommand("Resp: ${response.o}")
+                        ShellResult(true, response.o)
+                    } else {
+                        logCommand("Error RC: ${response.ret}")
+                        ShellResult(false, "Error ${response.ret}")
+                    }
+                } catch (e: Exception) {
+                    logCommand("Error: ${e.message}")
+                    ShellResult(false, e.message ?: "Command failed")
                 }
-            } catch (e: Exception) {
-                logCommand("Error: ${e.message}")
             }
         }
     }
@@ -220,6 +240,8 @@ class AtmotubeBleManager(
         _commandLogs.value = list
     }
 }
+
+data class ShellResult(val ok: Boolean, val output: String)
 
 sealed class ConnectionState {
     object Disconnected : ConnectionState()
