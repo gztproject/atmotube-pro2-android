@@ -9,4 +9,5 @@ object AirStore {
     const val KEY_WIDGET_LINES = "widget_lines"
     const val KEY_WIDGET_UPDATED = "widget_updated"
     const val KEY_PM_HOUR = "pm_hour"
+    const val KEY_PM_HOLD = "pm_hold"
 }

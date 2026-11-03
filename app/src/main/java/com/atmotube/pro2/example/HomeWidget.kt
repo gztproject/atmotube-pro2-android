@@ -29,6 +29,7 @@ fun widgetLines(
     pm: AtmotubePmReading?,
     cuts: Map<Pollutant, BandCuts>,
     hourly: HourlyPm?,
+    pmHeld: Boolean = false,
     locale: Locale = Locale.getDefault(),
 ): List<WidgetLine> {
     if (selected.isEmpty()) {
@@ -37,11 +38,12 @@ fun widgetLines(
     return Pollutant.entries.filter { it in selected }.map { pollutant ->
         val metric = widgetMetric(pollutant, reading, pm, cuts, locale)
         val hourValue = hourlyValue(pollutant, hourly)
+        val pmPollutant = pollutant == Pollutant.PM1 || pollutant == Pollutant.PM25 || pollutant == Pollutant.PM10
         val detail = when {
             metric.level == AirLevel.UNKNOWN -> metric.caption
+            pmHeld && pmPollutant -> "${metric.caption} · last read"
             hourValue != null -> "${metric.caption} · this hour ${formatPm(hourValue, locale)}"
-            pollutant == Pollutant.PM1 || pollutant == Pollutant.PM25 || pollutant == Pollutant.PM10 ->
-                "${metric.caption} · live"
+            pmPollutant -> "${metric.caption} · live"
             else -> metric.caption
         }
         val shown = if (metric.unit.isEmpty()) metric.value else "${metric.value} ${metric.unit}"

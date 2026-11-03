@@ -1,6 +1,7 @@
 package com.atmotube.pro2.example.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +45,7 @@ import com.atmotube.pro2.example.climateReadout
 import com.atmotube.pro2.example.co2Metric
 import com.atmotube.pro2.example.defaultCuts
 import com.atmotube.pro2.example.errorLabels
+import com.atmotube.pro2.example.formatParticleCount
 import com.atmotube.pro2.example.formatPm
 import com.atmotube.pro2.example.HourlyPm
 import com.atmotube.pro2.example.gpsHasFix
@@ -67,6 +69,9 @@ fun DashboardScreen(
     pmReading: AtmotubePmReading?,
     gpsReading: AtmotubeGpsReading?,
     hourlyPm: HourlyPm?,
+    pmHeld: Boolean,
+    pmMeasuring: Boolean,
+    onReadPm: (() -> Unit)?,
     historyPending: Boolean,
     hasHistory: Boolean,
     isDownloadingHistory: Boolean,
@@ -81,6 +86,10 @@ fun DashboardScreen(
 ) {
     val locale = Locale.getDefault()
     val cuts = profile.cuts
+    fun pmNote(current: Double, hourly: Double?, locale: Locale): String? {
+        if (pmMeasuring) return "Starting the sensor"
+        return pmCardFootnote(current, hourly, locale, held = pmHeld, canMeasure = onReadPm != null)
+    }
     val summary = summarize(pollutantValues(reading, pmReading), locale, cuts)
     val climate = reading?.let {
         climateReadout(it.temperature, it.humidity, it.pressure, it.errorFlags, locale)
@@ -159,12 +168,14 @@ fun DashboardScreen(
                 MetricCard(
                     metric = pmReading?.let { pm25Metric(it.pm25, locale, cuts.getValue(Pollutant.PM25)) } ?: waitingMetric("PM2.5"),
                     modifier = Modifier.weight(1f),
-                    footnote = pmReading?.let { pmCardFootnote(it.pm25, hourlyPm?.pm25, locale) },
+                    footnote = pmReading?.let { pmNote(it.pm25, hourlyPm?.pm25, locale) },
+                    onClick = onReadPm,
                 )
                 MetricCard(
                     metric = pmReading?.let { pm10Metric(it.pm10, locale, cuts.getValue(Pollutant.PM10)) } ?: waitingMetric("PM10"),
                     modifier = Modifier.weight(1f),
-                    footnote = pmReading?.let { pmCardFootnote(it.pm10, hourlyPm?.pm10, locale) },
+                    footnote = pmReading?.let { pmNote(it.pm10, hourlyPm?.pm10, locale) },
+                    onClick = onReadPm,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -172,7 +183,8 @@ fun DashboardScreen(
                 MetricCard(
                     metric = pmReading?.let { pm1Metric(it.pm1, locale, cuts.getValue(Pollutant.PM1)) } ?: waitingMetric("PM1"),
                     modifier = Modifier.weight(1f),
-                    footnote = pmReading?.let { pmCardFootnote(it.pm1, hourlyPm?.pm1, locale) },
+                    footnote = pmReading?.let { pmNote(it.pm1, hourlyPm?.pm1, locale) },
+                    onClick = onReadPm,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -271,8 +283,13 @@ private fun SummaryCard(summary: com.atmotube.pro2.example.AirSummary) {
 }
 
 @Composable
-private fun MetricCard(metric: Metric, modifier: Modifier, footnote: String? = null) {
-    Card(modifier = modifier) {
+private fun MetricCard(
+    metric: Metric,
+    modifier: Modifier,
+    footnote: String? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    Card(modifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             Box(
                 modifier = Modifier
@@ -341,7 +358,7 @@ private fun ParticleCard(pm: AtmotubePmReading, locale: Locale) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Particles", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
-                "0.5 / 1 / 2.5 / 10 µm: ${pm.pm05Particles} / ${pm.pm1Particles} / ${pm.pm25Particles} / ${pm.pm10Particles} per cm³",
+                "0.5 / 1 / 2.5 / 10 µm: ${formatParticleCount(pm.pm05Particles)} / ${formatParticleCount(pm.pm1Particles)} / ${formatParticleCount(pm.pm25Particles)} / ${formatParticleCount(pm.pm10Particles)} per cm³",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(

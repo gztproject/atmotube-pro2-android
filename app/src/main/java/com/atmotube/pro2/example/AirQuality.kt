@@ -272,9 +272,21 @@ fun usablePm(value: Double): Double? {
 }
 
 /** Current PM stays on the card. The hour is a footnote once it has been collected. */
-fun pmCardFootnote(current: Double, hourlyAverage: Double?, locale: Locale = Locale.getDefault()): String? {
-    if (usablePm(current) == null) return null
-    return if (hourlyAverage != null) "This hour ${formatPm(hourlyAverage, locale)}" else "Live"
+fun pmCardFootnote(
+    current: Double,
+    hourlyAverage: Double?,
+    locale: Locale = Locale.getDefault(),
+    held: Boolean = false,
+    canMeasure: Boolean = false,
+): String? {
+    if (usablePm(current) == null) return if (canMeasure) "Tap to measure" else null
+    val hour = hourlyAverage?.let { " · this hour ${formatPm(it, locale)}" }.orEmpty()
+    return when {
+        held && canMeasure -> "Last read · tap$hour"
+        held -> "Last read$hour"
+        hourlyAverage != null -> "This hour ${formatPm(hourlyAverage, locale)}"
+        else -> "Live"
+    }
 }
 
 fun formatPm(micrograms: Double?, locale: Locale = Locale.getDefault()): String {

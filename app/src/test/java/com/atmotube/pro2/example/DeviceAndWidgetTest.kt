@@ -67,7 +67,7 @@ class DeviceAndWidgetTest {
             pm10Particles = 0,
             typicalParticleSize = 0.6,
         )
-        val live = widgetLines(setOf(Pollutant.PM25), null, pm, defaultProfile().cuts, hourly = null, locale)
+        val live = widgetLines(setOf(Pollutant.PM25), null, pm, defaultProfile().cuts, hourly = null, locale = locale)
         assertEquals("7.0 µg/m³", live.single().value)
         assertTrue(live.single().detail.contains("live"))
         assertTrue(!live.single().detail.contains("this hour"))
@@ -78,7 +78,7 @@ class DeviceAndWidgetTest {
             pm,
             defaultProfile().cuts,
             HourlyPm(pm1 = null, pm25 = 4.0, pm10 = null),
-            locale,
+            locale = locale,
         )
         assertEquals("7.0 µg/m³", settled.single().value)
         assertTrue(settled.single().detail.contains("this hour 4.0"))
@@ -89,4 +89,37 @@ class DeviceAndWidgetTest {
         assertEquals("Connect to show live readings", widgetFreshness(null, 0L, locale, TimeZone.getTimeZone("UTC")))
         assertEquals("Live", widgetFreshness(1_000L, 2_000L, locale, TimeZone.getTimeZone("UTC")))
     }
+
+    @Test
+    fun pmHoldsTheBurstAverageWhileTheSensorIsOff() {
+        val first = pm(6.0, 10.0, 12.0, particles = 40)
+        val second = pm(8.0, 20.0, 16.0, particles = 60)
+        val off = pm(6553.5, 6553.5, 6553.5, particles = 65535)
+        val burst = PmTracker().accept(first).accept(second)
+        val held = burst.accept(off)
+        val frozen = checkNotNull(held.held)
+        assertEquals(15.0, frozen.pm25, 0.001)
+        assertEquals(50, frozen.pm05Particles)
+        val view = held.display(off)
+        assertTrue(view.held)
+        assertEquals(15.0, view.reading!!.pm25, 0.001)
+        val liveAgain = held.accept(pm(1.0, 4.0, 5.0, particles = 10)).display(pm(1.0, 4.0, 5.0, particles = 10))
+        assertEquals(false, liveAgain.held)
+        assertEquals(4.0, liveAgain.reading!!.pm25, 0.001)
+        assertEquals("Last read · tap", pmCardFootnote(15.0, null, locale, held = true, canMeasure = true))
+        assertEquals("Tap to measure", pmCardFootnote(6553.5, null, locale, canMeasure = true))
+        val restored = PmTracker.decode(held.encode())
+        assertEquals(15.0, restored.display(off).reading!!.pm25, 0.001)
+    }
+
+    private fun pm(pm1: Double, pm25: Double, pm10: Double, particles: Int) = AtmotubePmReading(
+        pm1 = pm1,
+        pm25 = pm25,
+        pm10 = pm10,
+        pm05Particles = particles,
+        pm1Particles = particles,
+        pm25Particles = particles,
+        pm10Particles = particles,
+        typicalParticleSize = 0.6,
+    )
 }

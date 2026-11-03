@@ -38,6 +38,7 @@ import com.atmotube.pro2.example.ui.HistoryScreen
 import com.atmotube.pro2.example.ui.ScanScreen
 import com.atmotube.pro2.example.ui.SettingsScreen
 import com.atmotube.pro2.example.ui.ToolsScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import no.nordicsemi.android.support.v18.scanner.BluetoothLeScannerCompat
 import no.nordicsemi.android.support.v18.scanner.ScanCallback
@@ -63,6 +64,9 @@ class MainActivity : ComponentActivity() {
     private var historyFile by mutableStateOf<File?>(null)
     private var profile by mutableStateOf(defaultProfile())
     private var pmHour by mutableStateOf(PmHourLog())
+    private var pmTracker by mutableStateOf(PmTracker())
+    private var pmMeasuring by mutableStateOf(false)
+    private var pmMeasureToken = 0
     private var widgetPollutants by mutableStateOf(defaultWidgetPollutants())
     private var pmStatus by mutableStateOf<PmStatus?>(null)
     private var gnssStatus by mutableStateOf<GnssStatus?>(null)
@@ -125,6 +129,7 @@ class MainActivity : ComponentActivity() {
         lastAddress = prefs.getString(AirStore.KEY_ADDRESS, null)
         profile = decodeProfile(prefs.getString(AirStore.KEY_BANDS, null))
         pmHour = PmHourLog.decode(prefs.getString(AirStore.KEY_PM_HOUR, null))
+        pmTracker = PmTracker.decode(prefs.getString(AirStore.KEY_PM_HOLD, null))
         widgetPollutants = decodeWidgetSelection(prefs.getString(AirStore.KEY_WIDGET_POLLUTANTS, null))
         alerts = AirAlerts(this)
         bleManager = AtmotubeBleManager(this, lifecycleScope)
@@ -173,6 +178,7 @@ class MainActivity : ComponentActivity() {
         val gpsReading by bleManager.gpsReading.collectAsState()
         val logs by bleManager.commandLogs.collectAsState()
         val firmware by bleManager.firmwareVersion.collectAsState()
+        val pmView = pmReading?.let { sample -> pmTracker.accept(sample).display(sample) } ?: PmView(null, false)
 
         LaunchedEffect(connectionState) {
             if (connectionState is ConnectionState.Ready) {
@@ -210,6 +216,12 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(pmReading) {
             val sample = pmReading ?: return@LaunchedEffect
+            val nextTracker = pmTracker.accept(sample)
+            if (nextTracker != pmTracker) {
+                pmTracker = nextTracker
+                prefs.edit().putString(AirStore.KEY_PM_HOLD, nextTracker.encode()).apply()
+            }
+            if (pmIsLive(sample)) pmMeasuring = false
             val next = pmHour.add(System.currentTimeMillis(), sample.pm1, sample.pm25, sample.pm10)
             if (next != pmHour) {
                 pmHour = next
@@ -217,17 +229,25 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        LaunchedEffect(reading, pmReading, profile, widgetPollutants) {
-            if (reading != null || pmReading != null) {
+        LaunchedEffect(reading, pmReading, profile, widgetPollutants, pmTracker) {
+            val shownPm = pmReading?.let { pmTracker.accept(it).display(it) }
+            if (reading != null || shownPm?.reading != null) {
                 val hourly = pmHour.hourly(System.currentTimeMillis())
-                val lines = widgetLines(widgetPollutants, reading, pmReading, profile.cuts, hourly)
+                val lines = widgetLines(
+                    widgetPollutants,
+                    reading,
+                    shownPm?.reading,
+                    profile.cuts,
+                    hourly,
+                    pmHeld = shownPm?.held == true,
+                )
                 val encoded = encodeWidgetLines(lines)
                 if (encoded != lastWidgetEncoded) {
                     lastWidgetEncoded = encoded
                     AirWidgetProvider.publish(this@MainActivity, lines, System.currentTimeMillis())
                 }
             }
-            val snapshots = pollutantSnapshots(reading, pmReading, profile.cuts)
+            val snapshots = pollutantSnapshots(reading, shownPm?.reading, profile.cuts)
             val current = snapshots.mapValues { it.value.level }
             val previousForAlerts = Pollutant.entries.associateWith { pollutant ->
                 val nowEnabled = profile.alerts[pollutant]?.enabled == true
@@ -262,9 +282,12 @@ class MainActivity : ComponentActivity() {
                 connectionState = connectionState,
                 firmwareVersion = firmware,
                 reading = reading,
-                pmReading = pmReading,
+                pmReading = pmView.reading,
                 gpsReading = gpsReading,
                 hourlyPm = pmHour.hourly(System.currentTimeMillis()),
+                pmHeld = pmView.held,
+                pmMeasuring = pmMeasuring,
+                onReadPm = if (connectionState is ConnectionState.Ready) ::readPmNow else null,
                 historyPending = historyPending,
                 hasHistory = history.isNotEmpty(),
                 isDownloadingHistory = isDownloadingHistory,
@@ -417,6 +440,22 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             refreshDeviceSettings()
+        }
+    }
+
+    private fun readPmNow() {
+        if (bleManager.connectionState.value !is ConnectionState.Ready || pmMeasuring) return
+        pmMeasuring = true
+        val token = ++pmMeasureToken
+        lifecycleScope.launch {
+            val result = bleManager.execShell("pm", arrayOf("keepalive", "30"))
+            if (!result.ok) {
+                if (token == pmMeasureToken) pmMeasuring = false
+                Toast.makeText(this@MainActivity, "Could not start a PM reading", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            delay(35_000)
+            if (token == pmMeasureToken) pmMeasuring = false
         }
     }
 
