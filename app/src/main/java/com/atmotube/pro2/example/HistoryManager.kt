@@ -24,12 +24,17 @@ import kotlin.coroutines.suspendCoroutine
 private const val FOLDER_NEW = "h_new"
 private const val FOLDER_ACTIVE = "h_active"
 
+data class HistoryExport(
+    val file: File,
+    val measurements: List<HistoryMeasurement>,
+)
+
 class HistoryManager(
     private val context: Context,
     private val bleManager: AtmotubeBleManager
 ) {
 
-    suspend fun downloadHistory(): File? = withContext(Dispatchers.IO) {
+    suspend fun downloadHistory(): HistoryExport? = withContext(Dispatchers.IO) {
         val transport = bleManager.getTransport() ?: return@withContext null
         val fsManager = FsManager(transport)
 
@@ -73,7 +78,7 @@ class HistoryManager(
 
         // 5. Export to CSV
         if (allMeasurements.isNotEmpty()) {
-            return@withContext exportToCsv(allMeasurements)
+            return@withContext HistoryExport(exportToCsv(allMeasurements), allMeasurements)
         }
         return@withContext null
     }

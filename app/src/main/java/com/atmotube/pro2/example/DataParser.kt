@@ -23,6 +23,10 @@ fun checkFwNew(demandedMajor: Int, demandedMinor: Int, demandedPatch: Int, fw: S
     }
 }
 
+/** Pulls `3.1.0` out of a shell reply such as `"version app 3.1.0"` or a reply with a leading newline. */
+fun parseFirmwareVersion(output: String): String? =
+    Regex("""(\d+\.\d+\.\d+)""").find(output)?.groupValues?.get(1)
+
 data class AtmotubeReading(
     val deviceMac: String,
     val timestamp: Date = Date(),

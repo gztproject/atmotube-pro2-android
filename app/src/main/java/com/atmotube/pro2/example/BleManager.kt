@@ -64,6 +64,9 @@ class AtmotubeBleManager(
     private val _isNewPmFormat = MutableStateFlow<Boolean?>(null)
     val isNewPmFormat: StateFlow<Boolean?> = _isNewPmFormat.asStateFlow()
 
+    private val _firmwareVersion = MutableStateFlow<String?>(null)
+    val firmwareVersion: StateFlow<String?> = _firmwareVersion.asStateFlow()
+
     /** Emits every time the device pushes a "new history available" notification. */
     private val _historyReady = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val historyReady: SharedFlow<Unit> = _historyReady.asSharedFlow()
@@ -172,9 +175,14 @@ class AtmotubeBleManager(
             try {
                 val response = mgr.exec("version", arrayOf("app"))
                 if (response.ret.toInt() == 0) {
-                    val fw = response.o.removePrefix("version app").trim()
-                    _isNewPmFormat.value = checkFwNew(PM_NEW_FORMAT_FW.first, PM_NEW_FORMAT_FW.second, PM_NEW_FORMAT_FW.third, fw)
-                    logCommand("FW: $fw")
+                    val fw = parseFirmwareVersion(response.o)
+                    if (fw != null) {
+                        _firmwareVersion.value = fw
+                        _isNewPmFormat.value = checkFwNew(PM_NEW_FORMAT_FW.first, PM_NEW_FORMAT_FW.second, PM_NEW_FORMAT_FW.third, fw)
+                        logCommand("FW: $fw")
+                    } else {
+                        logCommand("FW read error: ${response.o.trim()}")
+                    }
                 }
             } catch (e: Exception) {
                 logCommand("FW read error: ${e.message}")
@@ -185,6 +193,11 @@ class AtmotubeBleManager(
     fun getTransport(): McuMgrTransport? = transport
 
     fun connectToDevice(device: BluetoothDevice) {
+        _latestReading.value = null
+        _pmReading.value = null
+        _gpsReading.value = null
+        _firmwareVersion.value = null
+        _isNewPmFormat.value = null
         connect(device)
             .retry(3, 100)
             .useAutoConnect(false)

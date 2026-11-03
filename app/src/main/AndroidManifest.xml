@@ -23,7 +23,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="Atmotube Sample"
+            android:label="@string/app_name"
             android:theme="@style/Theme.AtmotubePRO2Example">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
